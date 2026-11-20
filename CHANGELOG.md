@@ -10,6 +10,8 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-11-20
+
 ### Added
 
 - The official weather of Slovenia from ARSO (meteo.si) open data, without account or key.
@@ -25,4 +27,5 @@ the notes of the version's GitHub Release.
   failure).
 - English, French, German and Spanish.
 
-[Unreleased]: https://github.com/guim31/gladys-arso/commits/main
+[Unreleased]: https://github.com/guim31/gladys-arso/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/guim31/gladys-arso/releases/tag/v1.0.0
