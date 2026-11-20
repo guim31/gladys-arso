@@ -16,8 +16,8 @@ its only runtime dependency. It started from the official JavaScript template.
 ```bash
 npm install
 npm test                                  # node --test, the built-in runner
-node --test test/devices.test.js          # one file
-node --test --test-name-pattern "plug"    # tests whose name matches
+node --test test/model.test.js            # one file
+node --test --test-name-pattern "warning" # tests whose name matches
 npm run lint                              # ESLint
 npm run format:check                      # Prettier, as the CI runs it
 npm run format                            # Prettier, fix in place
@@ -31,16 +31,20 @@ pushing.
 ## Architecture
 
 ```
-index.js                          SDK wiring only: handlers registered before connect()
-src/devices/index.js              registry of the device blueprints + dispatch helpers
-src/devices/<type>.js             one device type per file (buildDevice, onPoll, onSetValue...)
-src/scenes.js                     scene action handlers (manifest `scene_actions`)
-src/widgets.js                    dashboard widget handlers (manifest `widgets`)
+index.js                          SDK wiring only: registerHandlers(gladys), connect()
+src/app.js                        handlers: scan, poll fallback, device created, actions, widget, config
+src/service.js                    setup (house/coordinates/station, region, warning area), refresh cycle, states, trigger, status
+src/poller.js                     the container's own refresh timer (Gladys#3198), onPoll as fallback
+src/devices.js                    the two devices (station, place): features and states
+src/arso/client.js                HTTP client of the ARSO XML files (no query string, nothing personal sent)
+src/arso/model.js                 pure parsers: observations, regional forecast, CAP warnings, polygons
+src/widgets.js                    dashboard widget "weather" (pure content builder)
+src/i18n.js                       every produced text, en/fr/de/es
 src/config.js                     DEFAULT_CONFIG (mirrors the manifest defaults) + normalization
-src/weather.js                    example driver (Open-Meteo)
+src/store.js, src/issues.js       /data/state.json (warnings announced), failures logged once
 gladys-assistant-integration.json manifest: name, config_schema, actions, image...
-docs/en.md, docs/fr.md            user documentation, re-hosted by Gladys (mandatory)
-test/                             node --test, against the SDK's fake Gladys (integration-sdk/testing)
+docs/{en,fr,de,es}.md             user documentation, re-hosted by Gladys (same sections)
+test/                             node --test, against the SDK's fake Gladys and the real ARSO files of test/fixtures
 .github/scripts/release.mjs       release helpers (manifest bump, changelog), tested in test/
 ```
 
@@ -78,8 +82,9 @@ test/                             node --test, against the SDK's fake Gladys (in
   `type: "provider"`: 5.1.0). `test/manifest.test.js` ties the manifest to the
   code (defaults, action, scene and widget handlers): change both sides
   together.
-- **User-facing text** is bilingual (English and French): action messages,
-  manifest texts, and `docs/en.md` / `docs/fr.md`, kept in sync.
+- **User-facing text** exists in English, French, German and Spanish: action
+  messages, manifest texts, feature names, widget texts, and `docs/{en,fr,de,es}.md`,
+  kept in sync (`test/i18n.test.js`).
 - **Style.** Prettier formats, ESLint catches mistakes. Comments explain why,
   in English. Tests never touch the network.
 
@@ -259,3 +264,33 @@ long, et sur un « Sie »/« Ihr… » de politesse en allemand. Le store exige 
 - Docs `en`, `fr`, `de`, `es` avec les mêmes sections.
 - Chauffe, ouverture, sécurité : ne rien rendre pilotable « comme un thermostat » ou par un assistant
   vocal quand une erreur serait dangereuse (leçon d'OctoPrint).
+
+## ARSO (propre à cette intégration)
+
+**Sources** (fichiers XML publics de `https://meteo.arso.gov.si/uploads/probase/www`, sans compte ni clé, aucune
+requête paramétrée : la position de la maison ne sort jamais du conteneur) :
+
+- `observ/surface/text/sl/observationAms_si_latest.xml` : dernière mesure de toutes les stations automatiques
+  (~104), 800 Ko bruts, ~30 Ko en gzip (`fetch` de Node décompresse). Il n'existe **pas** de version `en/` (404),
+  et les fichiers par station ne couvrent pas toutes les stations : on lit le fichier complet.
+- `fproduct/text/en/forecast_si_latest.xml` : prévision quotidienne des 15 régions, 6 jours, mise à jour deux fois
+  par jour. `title` METEO_MODEL → `tnsyn`/`txsyn` ; METEO_FCAST → `tn`/`tx`. Le temps vient de
+  `nn_icon-wwsyn_icon` (`overcast_modRA`) : **`wwsyn_shortText` est faux quand l'icône est vide** (« Hail » par
+  temps clair, vu le 20/11/2026), ne pas s'en servir.
+- `warning/text/sl/warning_SLOVENIA_{NORTH-WEST,SOUTH-WEST,MIDDLE,NORTH-EAST,SOUTH-EAST}_latest_CAP.xml` : CAP 1.2,
+  une `info` par type et créneau, en `sl` et `en-GB`, polygone de la zone. `awareness_level` 1 = vert (= pas
+  d'avertissement), 2/3/4 = jaune/orange/rouge (publiés 1/2/3). Les types (`awareness_type`) suivent Meteoalarm,
+  plus `14; ice` (« poledica/žled », verglas).
+- Conditions : réutilisation libre avec mention « Vir: ARSO » (loi slovène, art. 14) : le widget affiche « Source : ARSO ».
+
+**Pièges découverts** :
+
+- Identifiants de station `domain_meteosiId` avec un `_` final (`LJUBL-ANA_BEZIGRAD_`) : normalisés sans le `_`
+  final, en majuscules (`stationKey`) ; `external_id` en minuscules.
+- Environ la moitié des stations n'ont ni vent ni pression : l'appareil station ne publie que les mesures présentes
+  au réglage, **plus** les fonctionnalités déjà ajoutées dans Gladys (`featureKeysOf`), pour qu'une mesure absente
+  un temps ne fasse jamais disparaître une fonctionnalité.
+- `rr_val` est la pluie de l'intervalle `validStart`–`validEnd` (10 min, parfois 30) : convertie en mm/h.
+- Pas d'unité W/m² dans Gladys : le rayonnement (`gSunRad`) n'est pas publié.
+- Les tests de déclencheur partent de `quietWarnings(area)` (le vrai fichier de la zone, tout passé au vert) : un
+  fichier d'une autre zone change le polygone, donc la zone de la maison.
