@@ -30,6 +30,13 @@ Gladys before reporting a problem.
 
 In scope: the code of this repository and the Docker image it publishes.
 
+What the integration handles: the position of the Gladys house (read through the `location`
+permission), used only inside the container to pick the nearest station, region and warning
+area. It is never sent anywhere: the integration downloads whole public files from
+`meteo.arso.gov.si` (HTTPS, no query string, no account, no key), and never writes the position to
+the logs. `/data/state.json` keeps only the ids of the warnings already announced to the scenes.
+There is no secret to store.
+
 Out of scope: Gladys Assistant itself (see its
 [security policy](https://github.com/GladysAssistant/Gladys/security/policy)),
-and the third-party services and devices the integration talks to.
+and ARSO's services.
