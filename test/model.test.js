@@ -149,3 +149,32 @@ test('the area of a place: the polygon that holds it, or the nearest one near th
 test('XML entities are decoded', () => {
   assert.equal(decode('Dež &amp; sneg &#382; &#x17E; &lt;'), 'Dež & sneg ž ž <');
 });
+
+test('tomorrow is the next calendar day, even on a DST night', () => {
+  const region = {
+    days: ['2026-10-24', '2026-10-25', '2026-10-26'].map((date) => ({ date })),
+  };
+  // 00:30 on 25 October in Ljubljana (summer time ends that night): now + 24 h is still the 25th.
+  const night = Date.parse('2026-10-24T22:30:00Z');
+  const { today, tomorrow } = forecastDays(region, night, TIME_ZONE);
+  assert.deepEqual([today.date, tomorrow.date], ['2026-10-25', '2026-10-26']);
+});
+
+test('a warning id names its area; duplicates keep the highest level', () => {
+  const xml = FIXTURES.warnings['SOUTH-WEST'];
+  const [rain] = parseWarnings(xml).warnings;
+  assert.equal(rain.id, 'SLOVENIA_SOUTH-WEST:rain@2026-11-22T07:00:00.000Z');
+  // The same English info twice, the second one orange.
+  const info = xml
+    .match(/<info><language>en-GB<\/language>(?:(?!<\/info>)[\s\S])*?10; rain[\s\S]*?<\/info>/g)
+    .find((block) => block.includes('2; yellow'));
+  const doubled = xml.replace(
+    '</alert>',
+    `${info.replace('2; yellow; Moderate', '3; orange; Severe')}</alert>`,
+  );
+  const rains = parseWarnings(doubled).warnings.filter((w) => w.type === 'rain');
+  assert.deepEqual(
+    rains.map((w) => w.level),
+    [2],
+  );
+});

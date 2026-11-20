@@ -232,7 +232,9 @@ export function localDay(time, timeZone) {
 /** Today's and tomorrow's forecast of a region, null when not published. */
 export function forecastDays(region, now, timeZone) {
   const today = localDay(now, timeZone);
-  const tomorrow = localDay(now + 24 * 3600 * 1000, timeZone);
+  // The next calendar day, not now + 24 h: a DST night has 23 or 25 hours.
+  const [year, month, date] = today.split('-').map(Number);
+  const tomorrow = new Date(Date.UTC(year, month - 1, date + 1)).toISOString().slice(0, 10);
   const day = (date) => region?.days.find((entry) => entry.date === date) ?? null;
   return { today: day(today), tomorrow: day(tomorrow), all: region?.days ?? [] };
 }
@@ -312,7 +314,7 @@ export function parseWarnings(xml) {
     }
     const type = WARNING_TYPES[typeName] ?? 'other';
     warnings.push({
-      id: `${type}@${new Date(start).toISOString()}`,
+      id: `${areaId ?? 'UNKNOWN'}:${type}@${new Date(start).toISOString()}`,
       type,
       level,
       start,
@@ -321,6 +323,15 @@ export function parseWarnings(xml) {
       text: (field(info, 'description') ?? '').replace(/\s+/g, ' '),
     });
   }
+  // One entry per id (two ARSO types can share a key, e.g. both floods): the highest level.
+  const unique = new Map();
+  for (const warning of warnings) {
+    if (!unique.has(warning.id) || unique.get(warning.id).level < warning.level) {
+      unique.set(warning.id, warning);
+    }
+  }
+  warnings.length = 0;
+  warnings.push(...unique.values());
   warnings.sort((a, b) => a.start - b.start || b.level - a.level);
   const sent = Date.parse(field(xml, 'sent') ?? '');
   return {
@@ -347,9 +358,21 @@ export function inPolygon(lat, lon, polygon) {
   return inside;
 }
 
+/** Distance in km from a point to a segment (local flat projection, fine at this scale). */
+function segmentDistanceKm(lat, lon, [lat1, lon1], [lat2, lon2]) {
+  const kx = 111.32 * Math.cos((lat * Math.PI) / 180);
+  const ky = 110.57;
+  const [ax, ay] = [(lon1 - lon) * kx, (lat1 - lat) * ky];
+  const [bx, by] = [(lon2 - lon) * kx, (lat2 - lat) * ky];
+  const [dx, dy] = [bx - ax, by - ay];
+  const length = dx * dx + dy * dy;
+  const t = length === 0 ? 0 : Math.max(0, Math.min(1, -(ax * dx + ay * dy) / length));
+  return Math.hypot(ax + t * dx, ay + t * dy);
+}
+
 /**
  * The warning area of a point: the one whose polygon holds it, otherwise the
- * one with the nearest border point (a house just across the border).
+ * one with the nearest border (a house just across the border).
  * @param {Array<{ key: string, polygons: number[][][] }>} areas
  * @returns {{ key: string, distance: number } | null} distance 0 when inside
  */
@@ -360,8 +383,8 @@ export function areaOf(areas, lat, lon) {
       return { key: area.key, distance: 0 };
     }
     for (const polygon of area.polygons) {
-      for (const [pLat, pLon] of polygon) {
-        const distance = distanceKm(lat, lon, pLat, pLon);
+      for (let i = 0; i < polygon.length; i += 1) {
+        const distance = segmentDistanceKm(lat, lon, polygon[i], polygon[(i + 1) % polygon.length]);
         if (!best || distance < best.distance) {
           best = { key: area.key, distance };
         }

@@ -453,6 +453,16 @@ test('a configuration change re-reads everything for the new place', async () =>
   await world.app.stop();
 });
 
+test('a configuration change reuses the area polygons but re-reads the warnings', async () => {
+  const world = await createWorld();
+  const before = world.arso.count('warnings');
+  world.clock.now += 2 * 60 * 1000;
+  await world.gladys.fake.configUpdated({ language: 'en' });
+  assert.equal(world.arso.count('warnings'), before + 1, 'one area, not five');
+  assert.equal(world.arso.requests.at(-1).area, 'SOUTH-WEST');
+  await world.app.stop();
+});
+
 test('a scan request publishes the devices again', async () => {
   const world = await createWorld();
   const before = world.gladys.fake.requests.filter((r) => r.path === '/discovered_device').length;

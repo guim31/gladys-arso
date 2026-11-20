@@ -179,6 +179,8 @@ export function registerHandlers(gladys, options = {}) {
 
   gladys.onAction(ACTIONS.CHECK, async () => {
     logger.info('Action: check the connection');
+    // Not in the middle of a timer cycle: check() resets what it reads.
+    await poller.idle;
     const result = await service.check();
     refreshWidget();
     return checkMessage(result, { now: now(), timeZone });

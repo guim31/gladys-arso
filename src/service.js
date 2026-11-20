@@ -179,7 +179,8 @@ export function createService({ gladys, client, store, logger, getConfig, now, t
         }
       } else {
         area = found.key;
-        warnings = { data: areas.data[area], at: areas.at };
+        // Polygons kept from an earlier setup: their warnings are re-read by the cycle.
+        warnings = now() - areas.at < 60 * 1000 ? { data: areas.data[area], at: areas.at } : null;
       }
     }
     if (station) {
@@ -214,8 +215,10 @@ export function createService({ gladys, client, store, logger, getConfig, now, t
   }
 
   async function readForecast() {
+    // Taken before the await: a configuration change may reset the target meanwhile.
+    const { place } = target;
     const regions = parseForecast(await client.forecast());
-    const [region] = nearest(regions, target.place.lat, target.place.lon, 1);
+    const [region] = nearest(regions, place.lat, place.lon, 1);
     forecast = { region, at: now() };
     return region;
   }
@@ -405,8 +408,10 @@ export function createService({ gladys, client, store, logger, getConfig, now, t
         if (forceForecast || !forecast || now() - forecast.at >= FORECAST_MAX_AGE) {
           results.push(await attempt('forecast', 'Forecast', readForecast));
         }
-        // Setup has just read the warnings of every area.
-        results.push(fresh ? true : await attempt('warnings', 'Warnings', readWarnings));
+        // Setup may have just read the warnings of every area.
+        results.push(
+          fresh && warnings ? true : await attempt('warnings', 'Warnings', readWarnings),
+        );
       }
       await publishStates();
       await announceWarnings();
